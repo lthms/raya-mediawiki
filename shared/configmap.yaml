@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mediawiki-backup
+data:
+  endpoint: https://d42e617756d41ef6cbb65b434ee4efec.r2.cloudflarestorage.com
+  bucket: brains-on-the-shelf-backup

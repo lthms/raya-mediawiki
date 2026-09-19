@@ -1,0 +1,7 @@
+# Independent compatibility fixture; no cloud-lab checkout is needed.
+id: example
+title: Example wiki
+hostname: wiki.example.org
+database:
+  name: mediawiki
+appSecret: mediawiki-app

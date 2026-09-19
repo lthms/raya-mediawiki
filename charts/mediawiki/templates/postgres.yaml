@@ -1,0 +1,21 @@
+apiVersion: db.movetokube.com/v1alpha1
+kind: Postgres
+metadata:
+  annotations:
+    helm.sh/resource-policy: keep
+  name: {{ include "mw.name" . }}
+spec:
+  database: {{ include "mw.db" . }}
+  dropOnDelete: false
+---
+apiVersion: db.movetokube.com/v1alpha1
+kind: PostgresUser
+metadata:
+  annotations:
+    helm.sh/resource-policy: keep
+  name: {{ include "mw.name" . }}
+spec:
+  role: {{ include "mw.db" . }}
+  database: {{ include "mw.name" . }}
+  secretName: db
+  privileges: OWNER

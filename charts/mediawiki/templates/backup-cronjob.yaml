@@ -1,0 +1,68 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "mw.name" . }}-backup
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  timeZone: {{ .Values.timezone | quote }}
+  # Daily backups start on deployment; rehearse recovery after the first backup.
+  suspend: {{ .Values.backup.suspend }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 7200
+      template:
+        metadata:
+          labels:
+            app: {{ include "mw.name" . }}-backup
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 33
+            runAsGroup: 33
+            fsGroup: 33
+            fsGroupChangePolicy: OnRootMismatch
+            seccompProfile:
+              type: RuntimeDefault
+          # RWO can be shared by pods on one node; avoid a multi-attach deadlock.
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      app: {{ include "mw.name" . }}
+                  topologyKey: kubernetes.io/hostname
+          containers:
+            - name: backup
+              image: {{ include "mw.image" . | quote }}
+              command: [/bin/sh, /opt/mediawiki/backup.sh]
+              env:
+                {{- include "mw.backupEnv" . | nindent 16 }}
+              envFrom:
+                - secretRef:
+                    name: db-{{ include "mw.name" . }}
+                - secretRef:
+                    name: mediawiki-r2
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  memory: 512Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: [ALL]
+              volumeMounts:
+                - name: uploads
+                  mountPath: /data
+          volumes:
+            - name: uploads
+              persistentVolumeClaim:
+                claimName: {{ include "mw.name" . }}-uploads

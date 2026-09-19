@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mw.name" . }}
+spec:
+  selector:
+    app: {{ include "mw.name" . }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

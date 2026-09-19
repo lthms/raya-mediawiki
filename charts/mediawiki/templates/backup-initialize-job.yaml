@@ -1,0 +1,51 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "mw.name" . }}-backup-initialize-{{ include "mw.jobRevision" . }}
+  labels:
+    app: {{ include "mw.name" . }}-backup-initialize
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: {{ include "mw.name" . }}-backup-initialize
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 33
+        runAsGroup: 33
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: initialize-repository
+          image: {{ include "mw.image" . | quote }}
+          command: [/bin/sh, -ec]
+          args:
+            - |
+              # Existing repositories must open with the supplied password.
+              # restic init itself refuses existing config/keys/snapshots and
+              # propagates backend access errors; it never resets a repository.
+              if ! restic cat config > /dev/null; then
+                restic init
+              fi
+              restic cat config > /dev/null
+              echo 'Restic repository is ready.'
+          envFrom:
+            - secretRef:
+                name: mediawiki-r2
+          env:
+            {{- include "mw.backupEnv" . | nindent 12 }}
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]

@@ -1,0 +1,4 @@
+creation_rules:
+  - path_regex: shared/.*\.yaml$
+    encrypted_regex: ^(data|stringData)$
+    gcp_kms: projects/raya-dns/locations/europe-west4/keyRings/raya-sops/cryptoKeys/sops

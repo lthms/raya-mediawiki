@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "mw.name" . }}-settings
+data:
+  LocalSettings.php: |
+{{ .Files.Get "files/LocalSettings.php" | indent 4 }}

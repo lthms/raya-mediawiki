@@ -1,0 +1,255 @@
+name: Validate and release
+on:
+  pull_request:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: "Stable SemVer to publish (e.g. 0.1.0); leave empty to validate"
+        required: false
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: mediawiki-${{ github.event_name }}-${{ github.ref }}-${{ inputs.release_version }}
+  cancel-in-progress: false
+jobs:
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: azure/setup-helm@v4.3.1
+        with:
+          version: v4.2.2
+
+      - name: Render and test independent wiki instances
+        run: |
+          python3 -m pip install PyYAML==6.0.3
+          helm lint charts/mediawiki --strict -f tests/fixtures/values.yaml
+          python3 tests/test_mediawiki_chart.py --render-dir "${RUNNER_TEMP}/mediawiki-chart" -v
+          shellcheck images/mediawiki/backup.sh
+
+      - name: Refuse unencrypted shared Secrets
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+          import yaml
+          encrypted = re.compile(
+              r"ENC\[AES256_GCM,data:[A-Za-z0-9+/=]*,iv:[A-Za-z0-9+/=]+,"
+              r"tag:[A-Za-z0-9+/=]+,type:str\]"
+          )
+          failed = False
+          for path in sorted(Path("shared").rglob("*")):
+              if not path.is_file() or path.suffix not in {".yaml", ".yml"}:
+                  continue
+              for index, doc in enumerate(yaml.safe_load_all(path.read_text()), 1):
+                  if not isinstance(doc, dict) or doc.get("kind") != "Secret":
+                      continue
+                  sops = doc.get("sops")
+                  valid = isinstance(sops, dict) and bool(sops) and bool(sops.get("mac"))
+                  for field in ("data", "stringData"):
+                      values = doc.get(field, {})
+                      if not isinstance(values, dict):
+                          valid = False
+                          continue
+                      if any(not isinstance(value, str) or not encrypted.fullmatch(value)
+                             for value in values.values()):
+                          valid = False
+                  if not valid:
+                      print(f"::error file={path}::Secret document {index} is not fully SOPS-encrypted")
+                      failed = True
+          sys.exit(1 if failed else 0)
+          PY
+
+      - name: Validate rendered Kubernetes resources
+        uses: lthms/raya/.github/actions/validate-manifests@main
+        with:
+          paths: |
+            ${{ runner.temp }}/mediawiki-chart
+            shared
+
+  mediawiki-image:
+    needs: chart
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: azure/setup-helm@v4.3.1
+        with:
+          version: v4.2.2
+
+      - name: Prepare release coordinates
+        id: release
+        env:
+          REQUESTED_VERSION: ${{ inputs.release_version }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          publish=false
+          formal=false
+          version=""
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && -n "$REQUESTED_VERSION" ]]; then
+            [[ "$GITHUB_REF_NAME" == "$DEFAULT_BRANCH" ]]
+            [[ "$REQUESTED_VERSION" =~ ^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$ ]]
+            version="$REQUESTED_VERSION"
+            if git ls-remote --exit-code --tags origin "refs/tags/v$version"; then
+              echo "::error::Tag v$version already exists; choose a new release version."
+              exit 1
+            else
+              status=$?
+              [[ "$status" == 2 ]]
+            fi
+            publish=true
+            formal=true
+          elif [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF_NAME" == "$DEFAULT_BRANCH" ]]; then
+            version="0.0.0-dev.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}.g${GITHUB_SHA:0:12}"
+            publish=true
+          fi
+          {
+            echo "version=$version"
+            echo "publish=$publish"
+            echo "formal=$formal"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-docker-action@v5
+        with:
+          daemon-config: |
+            {"features":{"containerd-snapshotter":true}}
+
+      - uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Resolve the base image once
+        id: base
+        shell: bash
+        run: |
+          set -euo pipefail
+          mw_base_tag=mediawiki:1.43.9
+          mw_base_digest="$(docker buildx imagetools inspect "$mw_base_tag" | awk '$1 == "Digest:" && !found {print $2; found=1}')"
+          [[ "$mw_base_digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "reference=$mw_base_tag@$mw_base_digest" >> "$GITHUB_OUTPUT"
+          echo "Base image: $mw_base_tag@$mw_base_digest" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build both architectures for testing
+        uses: docker/build-push-action@v7
+        with:
+          context: ./images/mediawiki
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            MEDIAWIKI_BASE=${{ steps.base.outputs.reference }}
+          load: true
+          tags: mediawiki-home:ci
+
+      - name: Smoke test both architectures
+        shell: bash
+        run: |
+          set -euo pipefail
+          for mw_platform in linux/amd64 linux/arm64; do
+            docker run --rm --platform "$mw_platform" mediawiki-home:ci apache2ctl -t
+            docker run --rm --platform "$mw_platform" mediawiki-home:ci php -r 'exit(extension_loaded("pgsql") ? 0 : 1);'
+            docker run --rm --platform "$mw_platform" mediawiki-home:ci php -l /opt/mediawiki/initialize.php
+            docker run --rm --platform "$mw_platform" \
+              -v "$PWD/charts/mediawiki/files/LocalSettings.php:/tmp/LocalSettings.php:ro" \
+              mediawiki-home:ci php -l /tmp/LocalSettings.php
+            docker run --rm --platform "$mw_platform" mediawiki-home:ci restic version
+          done
+
+      - name: Log in to GHCR
+        if: steps.release.outputs.publish == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish checked image
+        id: publish
+        if: steps.release.outputs.publish == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: ./images/mediawiki
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            MEDIAWIKI_BASE=${{ steps.base.outputs.reference }}
+          push: true
+          tags: ${{ steps.release.outputs.image }}:${{ steps.release.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Package chart with the published image digest
+        if: steps.release.outputs.publish == 'true'
+        env:
+          MW_IMAGE: ${{ steps.release.outputs.image }}
+          MW_IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
+          MW_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 -m pip install PyYAML==6.0.3
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import re
+          import yaml
+
+          digest = os.environ["MW_IMAGE_DIGEST"]
+          assert re.fullmatch(r"sha256:[a-f0-9]{64}", digest)
+          assert digest != "sha256:" + "0" * 64
+          path = Path("charts/mediawiki/values.yaml")
+          values = yaml.safe_load(path.read_text())
+          values["image"] = {"repository": os.environ["MW_IMAGE"], "digest": digest}
+          path.write_text(yaml.safe_dump(values, sort_keys=False))
+          PY
+          helm lint charts/mediawiki --strict -f tests/fixtures/values.yaml
+          python3 tests/test_mediawiki_chart.py -v
+          helm package charts/mediawiki --version "$MW_VERSION" --destination dist
+
+      - name: Publish chart after image and chart checks pass
+        if: steps.release.outputs.publish == 'true'
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          MW_IMAGE: ${{ steps.release.outputs.image }}
+          MW_IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
+          MW_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io --username "$GHCR_USER" --password-stdin
+          helm push "dist/mediawiki-$MW_VERSION.tgz" "oci://$MW_IMAGE/charts" 2>&1 | tee chart-push.log
+          {
+            printf 'Chart: oci://%s/charts/mediawiki:%s\n\n' "$MW_IMAGE" "$MW_VERSION"
+            printf 'Image: %s@%s\n\n' "$MW_IMAGE" "$MW_IMAGE_DIGEST"
+            printf 'Chart push result (includes the OCI digest for Flux):\n\n'
+            cat chart-push.log
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the exact release chart
+        if: steps.release.outputs.publish == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mediawiki-${{ steps.release.outputs.version }}
+          path: dist/*.tgz
+          if-no-files-found: error
+
+      - name: Create tagged GitHub release with generated changelog
+        if: steps.release.outputs.formal == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MW_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "v$MW_VERSION" "dist/mediawiki-$MW_VERSION.tgz" \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "MediaWiki distribution $MW_VERSION" --generate-notes

@@ -1,0 +1,153 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mw.name" . }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: {{ include "mw.name" . }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include "mw.revision" . }}
+      labels:
+        app: {{ include "mw.name" . }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 33
+        runAsGroup: 33
+        fsGroup: 33
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: wait-for-install
+          image: {{ include "mw.image" . | quote }}
+          command: [/bin/sh, -ec]
+          args:
+            - mkdir -p /data/uploads /data/control; exec php /opt/mediawiki/initialize.php --wait
+          volumeMounts:
+            - name: uploads
+              mountPath: /data
+          envFrom:
+            - secretRef:
+                name: db-{{ include "mw.name" . }}
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+      containers:
+        - name: web
+          image: {{ include "mw.image" . | quote }}
+          envFrom:
+            - secretRef:
+                name: db-{{ include "mw.name" . }}
+          env:
+            {{- include "mw.env" . | nindent 12 }}
+            - name: MW_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "mw.appSecret" . }}
+                  key: MW_SECRET_KEY
+            - name: MW_UPGRADE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "mw.appSecret" . }}
+                  key: MW_UPGRADE_KEY
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1536Mi
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 5
+          readinessProbe:
+            exec:
+              command: [php, /opt/mediawiki/initialize.php, --check]
+            timeoutSeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: settings
+              mountPath: /var/www/html/LocalSettings.php
+              subPath: LocalSettings.php
+              readOnly: true
+            - name: uploads
+              mountPath: /data
+        - name: jobs
+          image: {{ include "mw.image" . | quote }}
+          command: [/bin/sh, -ec]
+          args:
+            - |
+              while :; do
+                if [ ! -f /data/control/read-only ]; then
+                  php maintenance/run.php runJobs --maxjobs=20 --maxtime=30
+                fi
+                sleep 10
+              done
+          envFrom:
+            - secretRef:
+                name: db-{{ include "mw.name" . }}
+          env:
+            {{- include "mw.env" . | nindent 12 }}
+            - name: MW_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "mw.appSecret" . }}
+                  key: MW_SECRET_KEY
+            - name: MW_UPGRADE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "mw.appSecret" . }}
+                  key: MW_UPGRADE_KEY
+          resources:
+            requests:
+              cpu: 10m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: settings
+              mountPath: /var/www/html/LocalSettings.php
+              subPath: LocalSettings.php
+              readOnly: true
+            - name: uploads
+              mountPath: /data
+      volumes:
+        - name: settings
+          configMap:
+            name: {{ include "mw.name" . }}-settings
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: {{ include "mw.name" . }}-uploads

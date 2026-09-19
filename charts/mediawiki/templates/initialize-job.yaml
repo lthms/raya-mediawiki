@@ -1,0 +1,52 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "mw.name" . }}-initialize-{{ include "mw.jobRevision" . }}
+  labels:
+    app: {{ include "mw.name" . }}-initialize
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 1200
+  template:
+    metadata:
+      labels:
+        app: {{ include "mw.name" . }}-initialize
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 33
+        runAsGroup: 33
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: initialize
+          image: {{ include "mw.image" . | quote }}
+          command: [php, /opt/mediawiki/initialize.php, --install]
+          env:
+            {{- include "mw.env" . | nindent 12 }}
+          envFrom:
+            - secretRef:
+                name: db-{{ include "mw.name" . }}
+            - secretRef:
+                name: {{ include "mw.appSecret" . }}
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: settings
+              mountPath: /etc/mediawiki/LocalSettings.php
+              subPath: LocalSettings.php
+              readOnly: true
+      volumes:
+        - name: settings
+          configMap:
+            name: {{ include "mw.name" . }}-settings

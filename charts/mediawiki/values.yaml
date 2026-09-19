@@ -1,0 +1,19 @@
+# Required per instance; id is immutable and unique within the namespace.
+id: ""
+title: ""
+hostname: ""
+appSecret: ""
+language: fr
+timezone: Europe/Paris
+database:
+  name: ""
+image:
+  repository: ghcr.io/lthms/raya-mediawiki
+  # Development sentinel; release CI embeds the image digest in the packaged chart.
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+storage:
+  size: 10Gi
+backup:
+  schedule: "0 4 * * *"
+  suspend: false
+  keepDaily: 30
