@@ -34,17 +34,38 @@ function ready($db): bool {
     }
     return pg_fetch_result(query($db, 'SELECT count(*) FROM cloud_lab.bootstrap WHERE ready = true'), 0, 0) === '1';
 }
-function runCommand(array $command): void {
-    // Installer errors may contain credentials. Keep raw output in ephemeral /tmp,
-    // never emit it to Kubernetes logs. Inspection requires an explicit admin action.
-    $log = tempnam('/tmp', 'mediawiki-install-');
-    chmod($log, 0600);
-    $process = proc_open($command, [0 => ['file', '/dev/null', 'r'],
-        1 => ['file', $log, 'a'], 2 => ['file', $log, 'a']], $pipes, '/var/www/html');
-    if (!is_resource($process) || proc_close($process) !== 0) {
-        throw new RuntimeException('Maintenance command failed. Do not blindly reinstall; see runbook.');
+function redactOutput(string $output): string {
+    $replacements = [];
+    foreach (getenv() as $name => $value) {
+        if ($value === '' || !preg_match('/PASSWORD|SECRET|TOKEN|KEY/i', $name)) {
+            continue;
+        }
+        // Cover literal values and common URL, PHP and SQL escaping.
+        foreach ([$value, rawurlencode($value), urlencode($value), addslashes($value),
+                  str_replace("'", "''", $value)] as $secret) {
+            $replacements[$secret] = '[REDACTED]';
+        }
     }
-    unlink($log);
+    return strtr($output, $replacements);
+}
+function runCommand(array $command): void {
+    $stage = $command[2];
+    fwrite(STDERR, "Starting MediaWiki $stage.\n");
+    // Merge stderr into stdout to preserve diagnostics without competing pipes.
+    $process = proc_open($command, [0 => ['file', '/dev/null', 'r'],
+        1 => ['pipe', 'w'], 2 => ['redirect', 1]], $pipes, '/var/www/html');
+    if (!is_resource($process)) {
+        throw new RuntimeException("Could not start MediaWiki $stage.");
+    }
+    while (($line = fgets($pipes[1])) !== false) {
+        fwrite(STDERR, redactOutput($line));
+    }
+    fclose($pipes[1]);
+    $status = proc_close($process);
+    if ($status !== 0) {
+        throw new RuntimeException("MediaWiki $stage failed (exit $status); see output above.");
+    }
+    fwrite(STDERR, "MediaWiki $stage complete.\n");
 }
 try {
     $mode = $argv[1] ?? '--install';
@@ -53,6 +74,9 @@ try {
     }
     if ($mode === '--wait') {
         for ($attempt = 0; $attempt < 180; $attempt++) {
+            if ($attempt % 12 === 0) {
+                fwrite(STDERR, "Waiting for database initialization (poll $attempt/180).\n");
+            }
             try {
                 $db = connection();
                 if (ready($db)) { exit(0); }
