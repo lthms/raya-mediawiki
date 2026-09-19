@@ -7,6 +7,9 @@ metadata:
 spec:
   database: {{ include "mw.db" . }}
   dropOnDelete: false
+  # The operator owns schema provisioning under the database group role.
+  schemas:
+    - mediawiki
 ---
 apiVersion: db.movetokube.com/v1alpha1
 kind: PostgresUser
