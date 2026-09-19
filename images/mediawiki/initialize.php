@@ -141,11 +141,12 @@ try {
     }
     runCommand(['php', 'maintenance/run.php', 'update', '--quick',
         '--conf=/etc/mediawiki/LocalSettings.php']);
-    // Fresh install must contain exactly the one seeded account. Do this before
-    // opening the application, so no live user/cache state can race the grant.
-    $users = query($db, 'SELECT user_id FROM mediawiki."user"');
+    // Identify the seeded administrator by its sysop membership, not total users.
+    // Other accounts must never receive the accountcreator grant.
+    $users = query($db, 'SELECT u.user_id FROM mediawiki."user" u
+        JOIN mediawiki.user_groups g ON g.ug_user = u.user_id WHERE g.ug_group = $1', ['sysop']);
     if (pg_num_rows($users) !== 1) {
-        throw new RuntimeException('Expected exactly one initial administrator.');
+        throw new RuntimeException('Expected exactly one initial sysop; found ' . pg_num_rows($users) . '.');
     }
     $id = pg_fetch_result($users, 0, 0);
     query($db, 'BEGIN');
