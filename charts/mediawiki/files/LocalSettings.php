@@ -100,7 +100,11 @@ $wgImageMagickConvertCommand = '/usr/bin/convert';
 $wgImgAuthDetails = false;
 
 wfLoadSkin('Vector');
+wfLoadSkin('MinervaNeue');
+wfLoadExtension('MobileFrontend');
 $wgDefaultSkin = 'vector-2022';
+$wgDefaultMobileSkin = 'minerva';
+$wgMFAutodetectMobileView = true;
 wfLoadExtension('VisualEditor');
 wfLoadExtension('TemplateData');
 wfLoadExtension('PdfHandler');

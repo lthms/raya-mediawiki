@@ -12,6 +12,7 @@ RUN test "$MEDIAWIKI_VERSION" = "1.43.9" \
     && docker-php-ext-install pgsql \
     && rm -rf /var/lib/apt/lists/* \
     && test -f skins/Vector/skin.json \
+    && test -f skins/MinervaNeue/skin.json \
     && test -f extensions/VisualEditor/extension.json \
     && test -f extensions/TemplateData/extension.json \
     && test -f extensions/PdfHandler/extension.json \
@@ -22,6 +23,12 @@ RUN test "$MEDIAWIKI_VERSION" = "1.43.9" \
     && mkdir -p /var/run/apache2 /var/lock/apache2 /data/uploads /data/control \
     && chown -R www-data:www-data /var/run/apache2 /var/lock/apache2 /data \
     && printf 'ok\n' > /var/www/html/healthz
+# MobileFrontend is not bundled; use the branch matching MediaWiki 1.43.
+ADD https://github.com/wikimedia/mediawiki-extensions-MobileFrontend/archive/refs/heads/REL1_43.tar.gz /tmp/mobilefrontend.tar.gz
+RUN mkdir -p extensions/MobileFrontend \
+    && tar -xzf /tmp/mobilefrontend.tar.gz --strip-components=1 -C extensions/MobileFrontend \
+    && rm /tmp/mobilefrontend.tar.gz \
+    && test -f extensions/MobileFrontend/extension.json
 COPY apache.conf /etc/apache2/sites-enabled/mediawiki.conf
 COPY php.ini /usr/local/etc/php/conf.d/mediawiki.ini
 COPY initialize.php backup.sh /opt/mediawiki/
