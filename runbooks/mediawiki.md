@@ -25,8 +25,16 @@ The application init container waits for this marker; readiness also checks it.
 The Job uses a database advisory lock to serialize attempts. Existing marked
 databases are left alone. A nonempty MediaWiki schema without the marker requires
 manual investigation: do not drop tables or mark it ready without checking the
-schema and administrator. For a failed first installation with no valuable data,
-recreate only that disposable database deliberately before retrying.
+schema and administrator.
+
+The image sets `PGOPTIONS=-c role=none` so installation, updates, the application,
+and bootstrap checks use the authenticated login role. The operator's default
+group role cannot access tables created under MediaWiki's explicit login role.
+
+For a failed first installation with no valuable data, deliberately reset only
+that wiki's database schemas before retrying with the corrected image. This deletes
+all wiki content and accounts. Normal initialization refuses an unmarked nonempty
+schema; there is no automatic recovery or password reset.
 
 Confirm the Job completed and the Deployment is ready:
 

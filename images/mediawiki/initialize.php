@@ -104,8 +104,9 @@ try {
         echo "Already initialized; leaving accounts and passwords unchanged.\n";
         exit(0);
     }
+    // Catalogs include tables hidden from information_schema by missing privileges.
     $count = pg_fetch_result(query($db,
-        "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'mediawiki'"), 0, 0);
+        "SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'mediawiki' AND c.relkind IN ('r', 'p')"), 0, 0);
     if ($count !== '0') {
         throw new RuntimeException('Existing schema without completion marker; manual recovery required.');
     }

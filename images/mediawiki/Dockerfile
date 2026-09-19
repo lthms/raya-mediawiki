@@ -2,6 +2,9 @@
 # Example: --build-arg MEDIAWIKI_BASE=mediawiki:1.43.9@sha256:...
 ARG MEDIAWIKI_BASE
 FROM ${MEDIAWIKI_BASE}
+# Keep every libpq connection on the authenticated login, which owns MediaWiki tables.
+# The operator otherwise defaults connections to its database group role.
+ENV PGOPTIONS="-c role=none"
 USER root
 RUN test "$MEDIAWIKI_VERSION" = "1.43.9" \
     && apt-get update \
