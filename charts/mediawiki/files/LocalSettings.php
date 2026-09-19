@@ -73,6 +73,13 @@ $wgGroupPermissions['user']['createpage'] = true;
 $wgGroupPermissions['user']['createtalk'] = true;
 $wgGroupPermissions['user']['upload'] = true;
 $wgGroupPermissions['user']['reupload'] = true;
+// Every invited account can manage wiki content, without account administration.
+foreach (['move', 'move-subpages', 'move-categorypages', 'move-rootuserpages', 'movefile',
+          'delete', 'undelete', 'deletedhistory', 'deletedtext', 'browsearchive',
+          'protect', 'editprotected', 'editsemiprotected', 'rollback'] as $right) {
+    $wgGroupPermissions['user'][$right] = true;
+}
+unset($right);
 $wgGroupPermissions['accountcreator']['createaccount'] = true;
 // Only CLI administration can grant groups; initial admin is the sole member.
 $wgAddGroups = [];

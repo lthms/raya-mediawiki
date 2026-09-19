@@ -45,7 +45,8 @@ kubectl --context "$KUBE_CONTEXT" -n wiki rollout status deployment/mediawiki --
 
 Test anonymous page/API access, originals, thumbnails and PDF previews: content
 must not be accessible. Login must work. Check admin account creation and verify
-a normal account cannot create accounts, change groups, delete or protect pages.
+a normal account can move, delete, restore and protect pages, and roll back edits,
+but cannot create accounts, block users or change groups.
 Test source/visual editing, image insertion, search, jobs, and replacing a pod.
 
 The ConfigMap has a stable name; a configuration checksum rolls the application.
