@@ -108,6 +108,12 @@ $wgMFAutodetectMobileView = true;
 wfLoadExtension('VisualEditor');
 wfLoadExtension('TemplateData');
 wfLoadExtension('PdfHandler');
+wfLoadExtension('Widgets');
+// Compiled templates are disposable and must stay outside the document root.
+$wgWidgetsCompileDir = '/tmp/mediawiki-widgets';
+// Every invited account can create and edit widget definitions.
+$wgGroupPermissions['user']['editwidgets'] = true;
+$wgGroupPermissions['sysop']['editwidgets'] = true;
 $wgDefaultUserOptions['visualeditor-enable'] = 1;
 $wgDefaultUserOptions['visualeditor-editor'] = 'visualeditor';
 $wgDefaultUserOptions['visualeditor-edittab'] = 'visualeditor';

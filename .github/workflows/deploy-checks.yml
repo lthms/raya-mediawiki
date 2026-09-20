@@ -164,6 +164,17 @@ jobs:
               -v "$PWD/charts/mediawiki/files/LocalSettings.php:/tmp/LocalSettings.php:ro" \
               mediawiki-home:ci php -l /tmp/LocalSettings.php
             docker run --rm --platform "$mw_platform" mediawiki-home:ci restic version
+            docker run --rm -i --platform "$mw_platform" mediawiki-home:ci php <<'PHP'
+          <?php
+          require '/var/www/html/extensions/Widgets/vendor/autoload.php';
+          $smarty = new Smarty();
+          $smarty->setCompileDir('/tmp/mediawiki-widgets');
+          $smarty->assign('message', '<Widgets>');
+          $rendered = $smarty->fetch('string:{$message|escape:"html"}');
+          if ($rendered !== '&lt;Widgets&gt;') {
+              throw new RuntimeException('Widgets template compilation failed.');
+          }
+          PHP
           done
 
       - name: Log in to GHCR

@@ -59,6 +59,22 @@ Secret contents are not hashed: restart the Deployment after credential changes.
 If a failed initialization exhausted retries, fix the cause and delete that failed
 Job, then reconcile the HelmRelease to recreate it.
 
+## Widgets
+
+The image includes Widgets 1.7.1 and its Smarty dependency. Compiled templates
+live in `/tmp/mediawiki-widgets`, outside the document root, and are regenerated
+after container replacement. Widget definitions are wiki pages stored in PostgreSQL.
+
+All logged-in users can create and edit `Widget:` pages and include
+them with `{{#widget:WidgetName|parameter=value}}`. Installing the extension does
+not install any widget definitions. For Instagram, create a `Widget:Instagram`
+definition before using `{{#widget:Instagram|...}}`; its parameters depend on the
+definition you choose. After deployment, check `Special:Version` for Widgets and
+verify a widget renders as both an administrator and an ordinary editor.
+
+See the [Widgets documentation](https://www.mediawiki.org/wiki/Extension:Widgets)
+for widget definitions and parameter escaping.
+
 ## Daily upload backups
 
 The shared R2 bucket stays private. Use bucket-scoped S3 credentials. Set

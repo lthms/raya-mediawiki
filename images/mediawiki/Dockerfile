@@ -8,7 +8,7 @@ ENV PGOPTIONS="-c role=none"
 USER root
 RUN test "$MEDIAWIKI_VERSION" = "1.43.9" \
     && apt-get update \
-    && apt-get install -y --no-install-recommends libpq-dev ghostscript poppler-utils restic util-linux \
+    && apt-get install -y --no-install-recommends libpq-dev ghostscript poppler-utils restic util-linux unzip \
     && docker-php-ext-install pgsql \
     && rm -rf /var/lib/apt/lists/* \
     && test -f skins/Vector/skin.json \
@@ -29,6 +29,20 @@ RUN mkdir -p extensions/MobileFrontend \
     && tar -xzf /tmp/mobilefrontend.tar.gz --strip-components=1 -C extensions/MobileFrontend \
     && rm /tmp/mobilefrontend.tar.gz \
     && test -f extensions/MobileFrontend/extension.json
+# Widgets has a separate Composer dependency (Smarty), not bundled by MediaWiki.
+COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
+ADD https://github.com/wikimedia/mediawiki-extensions-Widgets/archive/refs/tags/1.7.1.tar.gz /tmp/widgets.tar.gz
+# The release has no lock file; omit development constraints before resolving
+# production dependencies, while preserving Composer's security checks.
+RUN mkdir -p extensions/Widgets \
+    && tar -xzf /tmp/widgets.tar.gz --strip-components=1 -C extensions/Widgets \
+    && rm /tmp/widgets.tar.gz \
+    && php -r '$p = "extensions/Widgets/composer.json"; $c = json_decode(file_get_contents($p), true, 512, JSON_THROW_ON_ERROR); unset($c["require-dev"]); file_put_contents($p, json_encode($c, JSON_THROW_ON_ERROR));' \
+    && composer install --working-dir=extensions/Widgets --no-dev --no-interaction --no-plugins --no-scripts --prefer-dist --optimize-autoloader \
+    && test -f extensions/Widgets/extension.json \
+    && test -f extensions/Widgets/vendor/autoload.php \
+    && mkdir -p /tmp/mediawiki-widgets \
+    && chown www-data:www-data /tmp/mediawiki-widgets
 COPY apache.conf /etc/apache2/sites-enabled/mediawiki.conf
 COPY php.ini /usr/local/etc/php/conf.d/mediawiki.ini
 COPY initialize.php backup.sh /opt/mediawiki/
