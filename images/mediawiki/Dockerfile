@@ -1,12 +1,12 @@
 # Resolve and supply the multi-architecture digest before building for release.
-# Example: --build-arg MEDIAWIKI_BASE=mediawiki:1.43.9@sha256:...
+# Example: --build-arg MEDIAWIKI_BASE=mediawiki:1.43.11@sha256:...
 ARG MEDIAWIKI_BASE
 FROM ${MEDIAWIKI_BASE}
 # Keep every libpq connection on the authenticated login, which owns MediaWiki tables.
 # The operator otherwise defaults connections to its database group role.
 ENV PGOPTIONS="-c role=none"
 USER root
-RUN test "$MEDIAWIKI_VERSION" = "1.43.9" \
+RUN test "$MEDIAWIKI_VERSION" = "1.43.11" \
     && apt-get update \
     && apt-get install -y --no-install-recommends libpq-dev ghostscript poppler-utils restic util-linux unzip \
     && docker-php-ext-install pgsql \

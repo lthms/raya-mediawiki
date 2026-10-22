@@ -136,7 +136,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mw_base_tag=mediawiki:1.43.9
+          mw_base_tag=mediawiki:1.43.11
           mw_base_digest="$(docker buildx imagetools inspect "$mw_base_tag" | awk '$1 == "Digest:" && !found {print $2; found=1}')"
           [[ "$mw_base_digest" =~ ^sha256:[a-f0-9]{64}$ ]]
           echo "reference=$mw_base_tag@$mw_base_digest" >> "$GITHUB_OUTPUT"
